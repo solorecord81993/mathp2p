@@ -102,7 +102,7 @@ function pickFillerCategory(room) {
 }
 
 function tryFillerChatter(room) {
-  if (!room.gameSocket) return; // no active game connected — nothing to comment on
+  if (room.dashboards.size === 0) return; // nobody watching — nothing to talk to
   if (!room.tts.isIdle()) return; // never pile up behind a real announcement
   if (Date.now() - room.lastSpeakAt < room.fillerThreshold) return;
   const gs = room.lastGameState || {};
