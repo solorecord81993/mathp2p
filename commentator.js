@@ -44,6 +44,44 @@ export const COMMENTATOR_PHRASES = {
     (winner, score) => `เกมจบแล้ว! ขอแสดงความยินดีกับ ${winner} ที่ได้ ${score} คะแนน!`,
     (winner) => `แชมป์ของวันนี้คือ ${winner}! เก่งมากครับ!`,
   ],
+
+  // ---- DJ-style filler chatter: fills dead air so the narrator is talking
+  // throughout the stream, not only reacting to specific events. ----
+  filler_lobby: [
+    'ยังไม่เริ่มเกมเลยนะครับ รอผู้เล่นเข้าห้องกันอยู่',
+    'เดี๋ยวเกมจะเริ่มแล้ว เตรียมสมองให้พร้อมนะทุกคน',
+    'ใครกำลังดูอยู่ พิมพ์ทักทายในคอมเมนต์ได้เลยครับ',
+    'Math Battle Live พร้อมมันส์ทุกวันนะครับ กดติดตามไว้เลย',
+    'วันนี้ใครจะมาเป็นแชมป์คิดเลขกันนะ รอลุ้นกันได้เลยครับ',
+    'ห้องกำลังจะเต็มแล้วนะครับ อีกไม่นานเกมเริ่มแน่นอน',
+    'ใครยังไม่ได้กดพร้อม รีบเลยนะครับ เดี๋ยวเกมเริ่มไม่ทัน',
+  ],
+  filler_playing: [
+    'คิดเร็ว ๆ นะทุกคน เวลาไม่รอใครนะครับ',
+    'ใครจะตอบถูกเป็นคนแรกในรอบนี้กันนะ',
+    'อย่าลืมกดไลค์เป็นกำลังใจให้ผู้เล่นด้วยนะครับ',
+    (round, rounds) => `ตอนนี้อยู่รอบที่ ${round || '?'} จากทั้งหมด ${rounds || '?'} รอบนะครับ`,
+    'ใช้เลขให้ครบทุกตัวนะครับ ห้ามเหลือ ห้ามขาด',
+    'สมาธิดี ๆ อีกนิดเดียวใกล้จะรู้ผลแล้วครับ',
+    'บวก ลบ คูณ หาร สลับกันไปมา คิดให้ไวเข้าไว้!',
+    'หายใจลึก ๆ แล้วลุยเลยครับ!',
+    'ตัวเลขชุดนี้ดูยากใช้ได้เลยนะครับวันนี้',
+  ],
+  filler_result: [
+    'ไปลุ้นรอบถัดไปกันเลยครับ',
+    'คะแนนสูสีมากเลยนะครับรอบนี้',
+    'ใครนำอยู่ตอนนี้ ไปดูกระดานคะแนนกันได้เลยครับ',
+    'เก่งกันทุกคนเลยนะครับวันนี้',
+    'สู้ ๆ นะครับ ยังมีรอบต่อไปให้ตามตีเสมอได้',
+  ],
+  filler_engage: [
+    'ใครดูอยู่ คอมเมนต์ทักทายกันหน่อยครับ',
+    'กดติดตามไว้เลยเพื่อไม่พลาดรอบต่อไปนะครับ',
+    'แชร์ไลฟ์นี้ให้เพื่อน ๆ มาลุ้นด้วยกันเลยครับ',
+    'ใครอยากเล่นด้วย เปิดเว็บ Math Battle แล้วพิมพ์รหัสห้องได้เลยครับ',
+    'กดหัวใจส่งกำลังใจให้ผู้เล่นกันหน่อยนะครับ',
+    'ขอบคุณทุกคนที่มาดูไลฟ์วันนี้นะครับ',
+  ],
 };
 
 export function getRandomPhrase(category, ...args) {
@@ -51,6 +89,28 @@ export function getRandomPhrase(category, ...args) {
   if (!phrases || !phrases.length) return '';
   const phrase = phrases[Math.floor(Math.random() * phrases.length)];
   return typeof phrase === 'function' ? phrase(...args) : phrase;
+}
+
+// Which mascot pose (public/mascot/<pose>.png) fits each phrase category.
+// wave = greet, explain = general talking, think = anticipation, confused = uh-oh, celebrate = hype.
+export const CATEGORY_POSE = {
+  welcome: 'wave',
+  viewerJoin: 'wave',
+  joinInstructions: 'explain',
+  roundStart: 'think',
+  correctAnswer: 'celebrate',
+  timeUp: 'confused',
+  like: 'explain',
+  gift: 'celebrate',
+  follow: 'wave',
+  gameEnd: 'celebrate',
+  filler_lobby: 'explain',
+  filler_playing: 'think',
+  filler_result: 'explain',
+  filler_engage: 'wave',
+};
+export function getPoseForCategory(category) {
+  return CATEGORY_POSE[category] || 'explain';
 }
 
 // One TTS queue per room. Higher priority jumps the line; same priority = FIFO.
@@ -64,7 +124,7 @@ export function createTtsQueue(onSpeak) {
     if (speaking || queue.length === 0) return;
     const item = queue.shift();
     speaking = true;
-    onSpeak(item.text);
+    onSpeak(item.text, item.pose);
     // Rough estimate of how long Thai TTS takes to say this line, so we don't
     // talk over ourselves. The dashboard's own utterance.onend is the real signal
     // for BGM ducking; this timer is only used to pace the *queue*.
@@ -77,9 +137,9 @@ export function createTtsQueue(onSpeak) {
   }
 
   return {
-    push(text, priority = 'normal') {
+    push(text, priority = 'normal', pose = 'explain') {
       if (!text) return;
-      queue.push({ text, priority, ts: Date.now() });
+      queue.push({ text, priority, pose, ts: Date.now() });
       queue.sort((a, b) => {
         if (a.priority !== b.priority) return PRIORITY[b.priority] - PRIORITY[a.priority];
         return a.ts - b.ts;
@@ -88,6 +148,9 @@ export function createTtsQueue(onSpeak) {
     },
     clear() {
       queue = [];
+    },
+    isIdle() {
+      return !speaking && queue.length === 0;
     },
   };
 }

@@ -81,9 +81,17 @@ npm start
 
 **Bridge → Dashboard**
 - ข้อความทั้งหมดที่ relay มาจากเกม (เหมือนด้านบน)
+- `{type:'game_disconnected'}` — ส่งทันทีที่ WebSocket ฝั่งเกมหลุด (ไม่ว่าจะกดออกจากห้องหรือปิดแท็บเฉย ๆ)
+  live.html จะขึ้นข้อความ "จบการถ่ายทอดสดแล้ว" คลุมจอ แล้วหายไปเองเมื่อมีเกม/host คนใหม่ต่อเข้ามาส่งข้อมูลอีกครั้ง
+  (รองรับ host migration ของเกมด้วย — host คนใหม่จะต่อ Bridge อัตโนมัติ)
 - `{type:'tiktok_event', event:'chat'|'gift'|'like'|'member'|'follow'|'share', user:{nickname}, ...}`
 - `{type:'viewer_count', count}`
-- `{type:'tts_speak', text}` — ให้ dashboard พูดด้วย Web Speech API (client-side)
+- `{type:'tts_speak', text, pose}` — ให้ dashboard พูดด้วย Web Speech API (client-side) พร้อมโชว์ตัวละคร
+  มาสคอต (`public/mascot/*.png`) เลื่อนเข้ามาจากมุมขวาล่างพร้อมลูกโป่งคำพูด `pose` เป็นหนึ่งใน
+  `wave`|`explain`|`think`|`confused`|`celebrate` — map จาก category ของประโยคใน commentator.js
+  (`CATEGORY_POSE`) มีทั้งคำพากย์ที่มาจากเหตุการณ์จริง (เริ่มรอบ/ตอบถูก/ของขวัญ ฯลฯ) และคำพากย์แทรก
+  "DJ chatter" ที่พูดเป็นระยะเมื่อเงียบไปนาน (สุ่มทุก ~6-12 วินาทีที่ไม่มีใครพูด ดู commentator.js
+  หมวด `filler_*` เพื่อแก้ไข/เพิ่มประโยค)
 - `{type:'tiktok_status', connected, username, error?}`
 
 ## ข้อจำกัดที่ควรรู้

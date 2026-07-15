@@ -27,7 +27,7 @@
 import http from 'node:http';
 import { WebSocketServer, WebSocket } from 'ws';
 import * as TTLC from 'tiktok-live-connector';
-import { getRandomPhrase, createTtsQueue } from './commentator.js';
+import { getRandomPhrase, createTtsQueue, getPoseForCategory } from './commentator.js';
 
 const PORT = process.env.PORT || 8080;
 const EULER_API_KEY = process.env.EULERSTREAM_API_KEY || '';
@@ -51,6 +51,16 @@ function errText(err) {
 /** @type {Map<string, Room>} */
 const rooms = new Map();
 
+// DJ-style filler chatter: when the narrator has been silent for a while and the
+// queue is idle, say something appropriate to the current game phase so the
+// narration keeps going throughout the stream instead of only reacting to events.
+const FILLER_CHECK_MS = 4000;
+const FILLER_MIN_MS = 6000;
+const FILLER_MAX_MS = 12000;
+function nextFillerThreshold() {
+  return FILLER_MIN_MS + Math.random() * (FILLER_MAX_MS - FILLER_MIN_MS);
+}
+
 function getRoom(code) {
   if (!rooms.has(code)) {
     const room = {
@@ -59,11 +69,45 @@ function getRoom(code) {
       dashboards: new Set(),
       lastGameState: null,
       tiktok: { username: null, connection: null, connected: false, connecting: false, viewerCount: 0 },
+      lastSpeakAt: Date.now(),
+      fillerThreshold: nextFillerThreshold(),
     };
-    room.tts = createTtsQueue((text) => broadcastDashboards(room, { type: 'tts_speak', text }));
+    room.tts = createTtsQueue((text, pose) => {
+      room.lastSpeakAt = Date.now();
+      broadcastDashboards(room, { type: 'tts_speak', text, pose });
+    });
+    room.fillerTimer = setInterval(() => tryFillerChatter(room), FILLER_CHECK_MS);
     rooms.set(code, room);
   }
   return rooms.get(code);
+}
+
+// Picks a random line from `category` and pushes it (with its mascot pose) onto the
+// room's TTS queue. Centralizing this here means every call site automatically gets
+// the right pose without having to look it up itself.
+function speakLine(room, category, priority, ...args) {
+  const text = getRandomPhrase(category, ...args);
+  if (!text) return;
+  room.tts.push(text, priority, getPoseForCategory(category));
+}
+
+function pickFillerCategory(room) {
+  const gs = room.lastGameState || {};
+  let pool;
+  if (gs.phase === 'playing') pool = ['filler_playing', 'filler_engage'];
+  else if (gs.phase === 'result') pool = ['filler_result', 'filler_engage'];
+  else if (gs.phase === 'final') pool = ['filler_engage'];
+  else pool = ['filler_lobby', 'filler_engage'];
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+function tryFillerChatter(room) {
+  if (!room.gameSocket) return; // no active game connected — nothing to comment on
+  if (!room.tts.isIdle()) return; // never pile up behind a real announcement
+  if (Date.now() - room.lastSpeakAt < room.fillerThreshold) return;
+  const gs = room.lastGameState || {};
+  speakLine(room, pickFillerCategory(room), 'low', gs.round, gs.rounds);
+  room.fillerThreshold = nextFillerThreshold();
 }
 
 function broadcastDashboards(room, obj) {
@@ -110,7 +154,7 @@ function startTikTok(room, usernameRaw) {
     const low = comment.toLowerCase();
     if (low.startsWith('!join') || low.startsWith('!play')) {
       const roomCode = (room.lastGameState && room.lastGameState.roomCode) || room.code;
-      room.tts.push(getRandomPhrase('joinInstructions', nickname, roomCode), 'high');
+      speakLine(room, 'joinInstructions', 'high', nickname, roomCode);
     }
   });
 
@@ -123,7 +167,7 @@ function startTikTok(room, usernameRaw) {
     // (repeatEnd === true) or immediately for non-streakable gifts, so the narrator doesn't spam.
     const isMidStreak = details && details.giftType === 1 && d.repeatEnd === false;
     broadcastDashboards(room, { type: 'tiktok_event', event: 'gift', user: { nickname }, giftName, repeatCount, midStreak: !!isMidStreak });
-    if (!isMidStreak) room.tts.push(getRandomPhrase('gift', nickname, giftName), 'normal');
+    if (!isMidStreak) speakLine(room, 'gift', 'normal', nickname, giftName);
   });
 
   conn.on('like', (d) => {
@@ -132,19 +176,19 @@ function startTikTok(room, usernameRaw) {
     broadcastDashboards(room, { type: 'tiktok_event', event: 'like', user: { nickname }, likeCount });
     // Likes fire very frequently on a busy stream — only narrate occasionally so the
     // commentator doesn't talk over everything else.
-    if (Math.random() < 0.12) room.tts.push(getRandomPhrase('like', nickname, likeCount), 'low');
+    if (Math.random() < 0.12) speakLine(room, 'like', 'low', nickname, likeCount);
   });
 
   conn.on('member', (d) => {
     const nickname = nick(d);
     broadcastDashboards(room, { type: 'tiktok_event', event: 'member', user: { nickname } });
-    if (Math.random() < 0.25) room.tts.push(getRandomPhrase('viewerJoin', nickname), 'low');
+    if (Math.random() < 0.25) speakLine(room, 'viewerJoin', 'low', nickname);
   });
 
   conn.on('follow', (d) => {
     const nickname = nick(d);
     broadcastDashboards(room, { type: 'tiktok_event', event: 'follow', user: { nickname } });
-    room.tts.push(getRandomPhrase('follow', nickname), 'normal');
+    speakLine(room, 'follow', 'normal', nickname);
   });
 
   conn.on('share', (d) => {
@@ -165,7 +209,7 @@ function startTikTok(room, usernameRaw) {
     room.tiktok.connected = true;
     log('[tiktok]', username, 'connected for room', room.code);
     broadcastDashboards(room, { type: 'tiktok_status', connected: true, username });
-    room.tts.push(getRandomPhrase('welcome'), 'high');
+    speakLine(room, 'welcome', 'high');
   });
 
   conn.on('disconnected', () => {
@@ -201,18 +245,18 @@ function handleGameMessage(room, msg) {
     return;
   }
   if (msg.type === 'round_start' && msg.data) {
-    room.tts.push(getRandomPhrase('roundStart', msg.data.round), 'normal');
+    speakLine(room, 'roundStart', 'normal', msg.data.round);
     return;
   }
   if (msg.type === 'round_end' && msg.data) {
     const d = msg.data;
-    if (d.winnerName) room.tts.push(getRandomPhrase('correctAnswer', d.winnerName, d.winnerScore || 3), 'high');
-    else if (d.anyCorrect === false) room.tts.push(getRandomPhrase('timeUp'), 'normal');
+    if (d.winnerName) speakLine(room, 'correctAnswer', 'high', d.winnerName, d.winnerScore || 3);
+    else if (d.anyCorrect === false) speakLine(room, 'timeUp', 'normal');
     return;
   }
   if (msg.type === 'game_end' && msg.data) {
     const d = msg.data;
-    if (d.winnerName) room.tts.push(getRandomPhrase('gameEnd', d.winnerName, d.winnerScore || 0), 'high');
+    if (d.winnerName) speakLine(room, 'gameEnd', 'high', d.winnerName, d.winnerScore || 0);
     return;
   }
 }
@@ -277,7 +321,11 @@ wss.on('connection', (ws) => {
     if (!roomCode) return;
     const room = rooms.get(roomCode);
     if (!room) return;
-    if (role === 'game' && room.gameSocket === ws) { room.gameSocket = null; log('[ws] game disconnected from room', roomCode); }
+    if (role === 'game' && room.gameSocket === ws) {
+      room.gameSocket = null;
+      log('[ws] game disconnected from room', roomCode);
+      broadcastDashboards(room, { type: 'game_disconnected' });
+    }
     if (role === 'dashboard') { room.dashboards.delete(ws); log('[ws] dashboard disconnected from room', roomCode); }
   });
 
