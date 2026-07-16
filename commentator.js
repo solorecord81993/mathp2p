@@ -25,6 +25,13 @@ export const COMMENTATOR_PHRASES = {
     (name, score) => `${name} ตอบถูกเร็วที่สุด! ได้ ${score} คะแนน!`,
     (name) => `สุดยอด! ${name} คิดเลขเร็วมาก!`,
   ],
+  // Teased live while someone's in-progress equation currently equals the target —
+  // before they've even hit submit.
+  closeToTarget: [
+    (name) => `เอ๊ะ ${name} ใกล้แล้วนะ รีบกดส่งเลย!`,
+    (name) => `${name} คิดถูกแล้วนิ! ส่งเร็ว ๆ ก่อนคนอื่นแซง!`,
+    (name) => `ว้าว ${name} ตรงเป้าแล้ว รอกดส่งอยู่รึเปล่าเนี่ย`,
+  ],
   timeUp: [
     'หมดเวลา! รอบนี้ไม่มีใครทำได้ตรงเป้าเลยครับ',
     'เวลาหมดแล้ว! ไปลุ้นรอบถัดไปกันเลย!',
@@ -109,6 +116,7 @@ export const CATEGORY_POSE = {
   joinInstructions: 'explain',
   roundStart: 'think',
   correctAnswer: 'celebrate',
+  closeToTarget: 'think',
   timeUp: 'confused',
   like: 'explain',
   gift: 'celebrate',

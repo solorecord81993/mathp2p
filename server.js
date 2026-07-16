@@ -71,6 +71,7 @@ function getRoom(code) {
       tiktok: { username: null, connection: null, connected: false, connecting: false, viewerCount: 0 },
       lastSpeakAt: Date.now(),
       fillerThreshold: nextFillerThreshold(),
+      hintedThisRound: new Set(),
     };
     room.tts = createTtsQueue((text, pose) => {
       room.lastSpeakAt = Date.now();
@@ -245,7 +246,17 @@ function handleGameMessage(room, msg) {
     return;
   }
   if (msg.type === 'round_start' && msg.data) {
+    room.hintedThisRound = new Set();
     speakLine(room, 'roundStart', 'normal', msg.data.round);
+    return;
+  }
+  if (msg.type === 'player_typing' && msg.data) {
+    const d = msg.data;
+    const target = room.lastGameState && room.lastGameState.target;
+    if (d.value != null && target != null && d.value === target && !room.hintedThisRound.has(d.id)) {
+      room.hintedThisRound.add(d.id);
+      speakLine(room, 'closeToTarget', 'high', d.name);
+    }
     return;
   }
   if (msg.type === 'round_end' && msg.data) {
