@@ -73,9 +73,14 @@ function getRoom(code) {
       fillerThreshold: nextFillerThreshold(),
       hintedThisRound: new Set(),
     };
-    room.tts = createTtsQueue((text, pose) => {
+    room.tts = createTtsQueue((text, pose, meta) => {
       room.lastSpeakAt = Date.now();
-      broadcastDashboards(room, { type: 'tts_speak', text, pose });
+      // category/args let the dashboard swap in the operator's edited wording; `text` is
+      // still sent so an older dashboard (or a category with no overrides) keeps working.
+      broadcastDashboards(room, {
+        type: 'tts_speak', text, pose,
+        category: meta && meta.category, args: (meta && meta.args) || [],
+      });
     });
     room.fillerTimer = setInterval(() => tryFillerChatter(room), FILLER_CHECK_MS);
     rooms.set(code, room);
@@ -89,7 +94,7 @@ function getRoom(code) {
 function speakLine(room, category, priority, ...args) {
   const text = getRandomPhrase(category, ...args);
   if (!text) return;
-  room.tts.push(text, priority, getPoseForCategory(category));
+  room.tts.push(text, priority, getPoseForCategory(category), { category, args });
 }
 
 function pickFillerCategory(room) {

@@ -143,7 +143,9 @@ export function createTtsQueue(onSpeak) {
     if (speaking || queue.length === 0) return;
     const item = queue.shift();
     speaking = true;
-    onSpeak(item.text, item.pose);
+    // meta travels with the line so the dashboard can re-render it from the operator's
+    // own phrase bank (see api/mc-phrases.js) instead of the wording chosen here.
+    onSpeak(item.text, item.pose, item.meta || null);
     // Rough estimate of how long Thai TTS takes to say this line, so we don't
     // talk over ourselves. The dashboard's own utterance.onend is the real signal
     // for BGM ducking; this timer is only used to pace the *queue*.
@@ -156,9 +158,9 @@ export function createTtsQueue(onSpeak) {
   }
 
   return {
-    push(text, priority = 'normal', pose = 'explain') {
+    push(text, priority = 'normal', pose = 'explain', meta = null) {
       if (!text) return;
-      queue.push({ text, priority, pose, ts: Date.now() });
+      queue.push({ text, priority, pose, meta, ts: Date.now() });
       queue.sort((a, b) => {
         if (a.priority !== b.priority) return PRIORITY[b.priority] - PRIORITY[a.priority];
         return a.ts - b.ts;
